@@ -46,3 +46,19 @@ def test_user_session_throw_advice_flow(tmp_path, monkeypatch):
     assert r.status_code == 200
     status = r.json()
     assert status["running"] is False
+
+
+def test_capture_disabled_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("DARTBOARD_DB_PATH", str(tmp_path / "api-disabled.db"))
+    monkeypatch.setenv("DARTBOARD_CAPTURE_ENABLED", "false")
+    api = importlib.import_module("src.dart_board.api")
+    api = importlib.reload(api)
+
+    client = TestClient(api.app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["capture_enabled"] == "false"
+
+    r = client.get("/capture/status")
+    assert r.status_code == 200
+    assert r.json()["last_error"] == "capture disabled in current deployment"

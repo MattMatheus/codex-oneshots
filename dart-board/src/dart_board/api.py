@@ -22,7 +22,8 @@ from .storage import DartBoardStore
 
 app = FastAPI(title="Dart Board MVP", version="0.3.0")
 store = DartBoardStore(db_path=os.getenv("DARTBOARD_DB_PATH", "dartboard.db"))
-capture_manager = USBCaptureManager(store=store)
+capture_enabled = os.getenv("DARTBOARD_CAPTURE_ENABLED", "true").lower() == "true"
+capture_manager = USBCaptureManager(store=store) if capture_enabled else None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -122,7 +123,10 @@ def ui_home() -> str:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "capture_enabled": "true" if capture_enabled else "false",
+    }
 
 
 @app.post("/users", response_model=UserOut)
@@ -184,6 +188,8 @@ def create_throw(payload: ThrowCreate) -> ThrowOut:
 
 @app.post("/capture/start", response_model=CaptureStatusOut)
 def start_capture(payload: CaptureStartRequest) -> CaptureStatusOut:
+    if capture_manager is None:
+        raise HTTPException(status_code=503, detail="capture disabled in current deployment")
     if store.get_user(payload.user_id) is None:
         raise HTTPException(status_code=404, detail="user not found")
 
@@ -208,12 +214,25 @@ def start_capture(payload: CaptureStartRequest) -> CaptureStatusOut:
 
 @app.post("/capture/stop", response_model=CaptureStatusOut)
 def stop_capture() -> CaptureStatusOut:
+    if capture_manager is None:
+        raise HTTPException(status_code=503, detail="capture disabled in current deployment")
     status = capture_manager.stop_capture()
     return CaptureStatusOut(**status)
 
 
 @app.get("/capture/status", response_model=CaptureStatusOut)
 def capture_status() -> CaptureStatusOut:
+    if capture_manager is None:
+        return CaptureStatusOut(
+            running=False,
+            user_id=None,
+            session_id=None,
+            camera_index=None,
+            fps=10,
+            frames_processed=0,
+            throws_detected=0,
+            last_error="capture disabled in current deployment",
+        )
     status = capture_manager.status()
     return CaptureStatusOut(**status)
 
