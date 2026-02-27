@@ -1,7 +1,8 @@
 import os
+import time
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 from .checkout import suggest_checkout
 from .heatmap import render_heatmap
@@ -11,6 +12,7 @@ from .models import (
     CaptureStatusOut,
     CheckoutSuggestion,
     FinishAdviceOut,
+    PreviewStartRequest,
     SessionCreate,
     SessionOut,
     ThrowCreate,
@@ -22,8 +24,7 @@ from .storage import DartBoardStore
 
 app = FastAPI(title="Dart Board MVP", version="0.3.0")
 store = DartBoardStore(db_path=os.getenv("DARTBOARD_DB_PATH", "dartboard.db"))
-capture_enabled = os.getenv("DARTBOARD_CAPTURE_ENABLED", "true").lower() == "true"
-capture_manager = USBCaptureManager(store=store) if capture_enabled else None
+capture_manager = USBCaptureManager(store=store)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -42,6 +43,17 @@ def ui_home() -> str:
     .card { border: 1px solid #2d3340; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; background: #131722; }
     img { max-width: 420px; border: 1px solid #2d3340; border-radius: 10px; }
     pre { background: #0d1117; padding: 0.75rem; border-radius: 8px; overflow: auto; }
+    .video-container { position: relative; display: inline-block; overflow: hidden; }
+    .video-container img { border-radius: 10px; }
+    .video-container .heatmap { position: absolute; opacity: 0.5; z-index: 2; pointer-events: none; transform-origin: center center; }
+    .video-container .live-feed { z-index: 1; display: block; }
+    .views { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .view-card { flex: 1; min-width: 300px; }
+    .slider-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+    .slider-row input[type="range"] { flex: 1; }
+    .slider-row label { min-width: 120px; }
+    .preview-badge { background: #d97706; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-left: 8px; }
+    .recording-badge { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-left: 8px; }
   </style>
 </head>
 <body>
@@ -63,15 +75,55 @@ def ui_home() -> str:
     <div class="row">
       <input id="cameraIndex" type="number" min="0" value="0" />
       <input id="fps" type="number" min="1" max="60" value="10" />
+      <button onclick="startPreview()" style="background: #92400e;">Preview</button>
       <button onclick="startCapture()">Start Capture</button>
-      <button onclick="stopCapture()">Stop Capture</button>
+      <button onclick="stopCapture()">Stop</button>
+      <button onclick="clearData()" style="background: #8b2635;">Clear Data</button>
       <button onclick="refresh()">Refresh</button>
+      <span id="modeBadge"></span>
     </div>
     <pre id="status"></pre>
   </div>
 
   <div class="card">
-    <h3>Heatmap</h3>
+    <h3>Live View</h3>
+    <div class="views">
+      <div class="view-card">
+        <h4>Camera Feed</h4>
+        <img id="liveFeed" src="" alt="Live feed (start preview or capture)" style="background: #1a1f2e; min-height: 240px;" />
+      </div>
+      <div class="view-card">
+        <h4>Heatmap Overlay <small>(adjust to align with board)</small></h4>
+        <div class="video-container">
+          <img id="liveOverlay" class="live-feed" src="" alt="Live overlay" style="background: #1a1f2e; min-height: 240px; width: 420px; height: 420px; object-fit: cover;" />
+          <img id="heatmapOverlay" class="heatmap" src="" alt="heatmap overlay" />
+        </div>
+        <div class="slider-row">
+          <label>Opacity:</label>
+          <input type="range" id="opacitySlider" min="0" max="100" value="50" oninput="updateOverlay()" />
+          <span id="opacityValue">50%</span>
+        </div>
+        <div class="slider-row">
+          <label>Size:</label>
+          <input type="range" id="sizeSlider" min="50" max="150" value="100" oninput="updateOverlay()" />
+          <span id="sizeValue">100%</span>
+        </div>
+        <div class="slider-row">
+          <label>X Offset:</label>
+          <input type="range" id="xOffsetSlider" min="-50" max="50" value="0" oninput="updateOverlay()" />
+          <span id="xOffsetValue">0%</span>
+        </div>
+        <div class="slider-row">
+          <label>Y Offset:</label>
+          <input type="range" id="yOffsetSlider" min="-50" max="50" value="0" oninput="updateOverlay()" />
+          <span id="yOffsetValue">0%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Heatmap Only</h3>
     <img id="heatmap" src="" alt="heatmap" />
   </div>
 
@@ -100,6 +152,12 @@ def ui_home() -> str:
 
     async function createUser() { await api("/users", "POST", { user_id: ids().user_id, name: ids().name }); await refresh(); }
     async function createSession() { await api("/sessions", "POST", { user_id: ids().user_id, session_id: ids().session_id, source_ref: ids().source_ref }); await refresh(); }
+    async function startPreview() {
+      const camera_index = Number(document.getElementById("cameraIndex").value);
+      const fps = Number(document.getElementById("fps").value);
+      await api("/capture/preview", "POST", { camera_index, fps });
+      await refresh();
+    }
     async function startCapture() {
       const camera_index = Number(document.getElementById("cameraIndex").value);
       const fps = Number(document.getElementById("fps").value);
@@ -107,12 +165,82 @@ def ui_home() -> str:
       await refresh();
     }
     async function stopCapture() { await api("/capture/stop", "POST"); await refresh(); }
+    async function clearData() {
+      if (!confirm("Clear all throw data for this user? This will reset the heatmap.")) return;
+      await api(`/throws/${ids().user_id}`, "DELETE");
+      await refresh();
+    }
+
+    let autoRefreshInterval = null;
+
+    function startAutoRefresh() {
+      if (autoRefreshInterval) return;
+      autoRefreshInterval = setInterval(() => {
+        const u = ids().user_id;
+        const heatmapUrl = `/heatmap/${u}.png?t=${Date.now()}`;
+        document.getElementById("heatmap").src = heatmapUrl;
+        document.getElementById("heatmapOverlay").src = heatmapUrl;
+      }, 1000); // Update heatmap every second
+    }
+
+    function stopAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+    }
+
+    function updateOverlay() {
+      const opacity = document.getElementById("opacitySlider").value;
+      const size = document.getElementById("sizeSlider").value;
+      const xOffset = document.getElementById("xOffsetSlider").value;
+      const yOffset = document.getElementById("yOffsetSlider").value;
+
+      document.getElementById("opacityValue").textContent = opacity + "%";
+      document.getElementById("sizeValue").textContent = size + "%";
+      document.getElementById("xOffsetValue").textContent = xOffset + "%";
+      document.getElementById("yOffsetValue").textContent = yOffset + "%";
+
+      const heatmapEl = document.getElementById("heatmapOverlay");
+      heatmapEl.style.opacity = opacity / 100;
+      heatmapEl.style.width = size + "%";
+      heatmapEl.style.height = size + "%";
+      heatmapEl.style.left = (50 - size/2 + Number(xOffset)) + "%";
+      heatmapEl.style.top = (50 - size/2 + Number(yOffset)) + "%";
+    }
 
     async function refresh() {
       const st = await api("/capture/status");
       document.getElementById("status").textContent = JSON.stringify(st, null, 2);
       const u = ids().user_id;
-      document.getElementById("heatmap").src = `/heatmap/${u}.png?t=${Date.now()}`;
+      const heatmapUrl = `/heatmap/${u}.png?t=${Date.now()}`;
+      document.getElementById("heatmap").src = heatmapUrl;
+      document.getElementById("heatmapOverlay").src = heatmapUrl;
+
+      // Update mode badge
+      const badge = document.getElementById("modeBadge");
+      if (st.running && st.preview_only) {
+        badge.innerHTML = '<span class="preview-badge">PREVIEW</span>';
+      } else if (st.running) {
+        badge.innerHTML = '<span class="recording-badge">● RECORDING</span>';
+        startAutoRefresh();
+      } else {
+        badge.innerHTML = '';
+        stopAutoRefresh();
+      }
+
+      // Update live feed sources based on capture status
+      if (st.running) {
+        const streamUrl = "/capture/stream";
+        document.getElementById("liveFeed").src = streamUrl;
+        document.getElementById("liveOverlay").src = streamUrl;
+      } else {
+        document.getElementById("liveFeed").src = "";
+        document.getElementById("liveOverlay").src = "";
+      }
+
+      // Apply current overlay settings
+      updateOverlay();
     }
 
     refresh().catch(err => { document.getElementById("status").textContent = String(err); });
@@ -123,10 +251,7 @@ def ui_home() -> str:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "capture_enabled": "true" if capture_enabled else "false",
-    }
+    return {"status": "ok"}
 
 
 @app.post("/users", response_model=UserOut)
@@ -186,10 +311,17 @@ def create_throw(payload: ThrowCreate) -> ThrowOut:
     )
 
 
+@app.delete("/throws/{user_id}")
+def clear_throws(user_id: str) -> dict[str, object]:
+    """Clear all throws for a user (resets their heatmap)."""
+    if store.get_user(user_id) is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    deleted = store.clear_throws_for_user(user_id)
+    return {"user_id": user_id, "deleted": deleted}
+
+
 @app.post("/capture/start", response_model=CaptureStatusOut)
 def start_capture(payload: CaptureStartRequest) -> CaptureStatusOut:
-    if capture_manager is None:
-        raise HTTPException(status_code=503, detail="capture disabled in current deployment")
     if store.get_user(payload.user_id) is None:
         raise HTTPException(status_code=404, detail="user not found")
 
@@ -214,27 +346,55 @@ def start_capture(payload: CaptureStartRequest) -> CaptureStatusOut:
 
 @app.post("/capture/stop", response_model=CaptureStatusOut)
 def stop_capture() -> CaptureStatusOut:
-    if capture_manager is None:
-        raise HTTPException(status_code=503, detail="capture disabled in current deployment")
     status = capture_manager.stop_capture()
+    return CaptureStatusOut(**status)
+
+
+@app.post("/capture/preview", response_model=CaptureStatusOut)
+def start_preview(payload: PreviewStartRequest) -> CaptureStatusOut:
+    """Start camera preview without recording data (for alignment)."""
+    try:
+        status = capture_manager.start_preview(
+            camera_index=payload.camera_index,
+            fps=payload.fps,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return CaptureStatusOut(**status)
 
 
 @app.get("/capture/status", response_model=CaptureStatusOut)
 def capture_status() -> CaptureStatusOut:
-    if capture_manager is None:
-        return CaptureStatusOut(
-            running=False,
-            user_id=None,
-            session_id=None,
-            camera_index=None,
-            fps=10,
-            frames_processed=0,
-            throws_detected=0,
-            last_error="capture disabled in current deployment",
-        )
     status = capture_manager.status()
     return CaptureStatusOut(**status)
+
+
+def _generate_mjpeg_stream():
+    """Generator that yields MJPEG frames for live streaming."""
+    while True:
+        frame = capture_manager.get_latest_frame()
+        if frame is not None:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            )
+        else:
+            # No frame available, send a small delay
+            time.sleep(0.1)
+        # Small delay to avoid overwhelming the client
+        time.sleep(0.03)
+
+
+@app.get("/capture/stream")
+def capture_stream():
+    """MJPEG live video stream from the capture camera."""
+    status = capture_manager.status()
+    if not status.get("running"):
+        raise HTTPException(status_code=404, detail="Capture not running")
+    return StreamingResponse(
+        _generate_mjpeg_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/checkout/{score}", response_model=CheckoutSuggestion)

@@ -63,8 +63,14 @@ class CaptureStartRequest(BaseModel):
     fps: int = Field(default=10, ge=1, le=60)
 
 
+class PreviewStartRequest(BaseModel):
+    camera_index: int = Field(default=0, ge=0)
+    fps: int = Field(default=10, ge=1, le=60)
+
+
 class CaptureStatusOut(BaseModel):
     running: bool
+    preview_only: bool = False
     user_id: str | None
     session_id: str | None
     camera_index: int | None
