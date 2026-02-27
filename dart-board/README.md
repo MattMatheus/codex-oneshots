@@ -19,17 +19,23 @@ Source idea: `app.dartboard.io`
 - Deployment mode: local-first, no external API required.
 
 ## Current MVP Capabilities
+- Local UI for USB capture operations and heatmap viewing.
 - Create users and sessions.
 - Store throw points (`x_norm`, `y_norm`, confidence).
+- USB camera capture start/stop/status (local OpenCV camera index).
 - Generate per-user heatmap PNG locally.
 - Checkout recommendation engine with double-out rules.
 - Finish advice endpoint (`can_finish` + combinations).
 
 ## API Endpoints
+- `GET /` (local UI)
 - `GET /health`
 - `POST /users`
 - `POST /sessions`
 - `POST /throws`
+- `POST /capture/start`
+- `POST /capture/stop`
+- `GET /capture/status`
 - `GET /checkout/{score}`
 - `GET /advice/{user_id}/{current_score}`
 - `GET /heatmap/{user_id}`
@@ -52,7 +58,9 @@ pip install -r requirements.txt
 uvicorn src.dart_board.api:app --reload
 ```
 
-Open: `http://127.0.0.1:8000/docs`
+Open:
+- UI: `http://127.0.0.1:8000/`
+- API docs: `http://127.0.0.1:8000/docs`
 
 ## Engineering Plan To Complete
 1. Streaming integration

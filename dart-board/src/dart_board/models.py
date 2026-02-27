@@ -54,3 +54,21 @@ class FinishAdviceOut(BaseModel):
     current_score: int
     can_finish: bool
     combinations: list[list[str]]
+
+
+class CaptureStartRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    camera_index: int = Field(default=0, ge=0)
+    fps: int = Field(default=10, ge=1, le=60)
+
+
+class CaptureStatusOut(BaseModel):
+    running: bool
+    user_id: str | None
+    session_id: str | None
+    camera_index: int | None
+    fps: int
+    frames_processed: int
+    throws_detected: int
+    last_error: str | None

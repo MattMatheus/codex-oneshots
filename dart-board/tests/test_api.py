@@ -37,3 +37,12 @@ def test_user_session_throw_advice_flow(tmp_path, monkeypatch):
     r = client.get("/heatmap/u1.png")
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
+
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+    r = client.get("/capture/status")
+    assert r.status_code == 200
+    status = r.json()
+    assert status["running"] is False
