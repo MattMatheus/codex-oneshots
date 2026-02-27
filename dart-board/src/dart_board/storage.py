@@ -180,3 +180,9 @@ class DartBoardStore:
                 )
                 for row in rows
             ]
+
+    def clear_throws_for_user(self, user_id: str) -> int:
+        """Delete all throws for a user. Returns the number of rows deleted."""
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM throws WHERE user_id = ?", (user_id,))
+            return cursor.rowcount
