@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  dart-board-api:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: dart-board-api
+    ports:
+      - "8000:8000"
+    environment:
+      DARTBOARD_DB_PATH: /data/dartboard.db
+      DARTBOARD_CAPTURE_ENABLED: "false"
+    volumes:
+      - dart_board_data:/data
+    restart: unless-stopped
+
+volumes:
+  dart_board_data:
