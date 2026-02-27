@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -15,15 +17,15 @@ class UserOut(BaseModel):
 class SessionCreate(BaseModel):
     session_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1)
-    source_ref: str | None = None
+    source_ref: Optional[str] = None
 
 
 class SessionOut(BaseModel):
     session_id: str
     user_id: str
     started_at: str
-    ended_at: str | None
-    source_ref: str | None
+    ended_at: Optional[str]
+    source_ref: Optional[str]
 
 
 class ThrowCreate(BaseModel):
@@ -65,10 +67,21 @@ class CaptureStartRequest(BaseModel):
 
 class CaptureStatusOut(BaseModel):
     running: bool
-    user_id: str | None
-    session_id: str | None
-    camera_index: int | None
+    user_id: Optional[str]
+    session_id: Optional[str]
+    camera_index: Optional[int]
     fps: int
     frames_processed: int
     throws_detected: int
-    last_error: str | None
+    last_error: Optional[str]
+
+
+class CalibrationSetRequest(BaseModel):
+    # Source points order: top-left, top-right, bottom-right, bottom-left
+    src_points: list[list[float]] = Field(min_length=4, max_length=4)
+
+
+class CalibrationStatusOut(BaseModel):
+    calibrated: bool
+    target_size: int
+    src_points: Optional[list[list[float]]]

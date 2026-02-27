@@ -62,3 +62,39 @@ def test_capture_disabled_mode(tmp_path, monkeypatch):
     r = client.get("/capture/status")
     assert r.status_code == 200
     assert r.json()["last_error"] == "capture disabled in current deployment"
+
+    r = client.get("/calibration/status")
+    assert r.status_code == 200
+    assert r.json()["calibrated"] is False
+
+    r = client.post(
+        "/calibration/set",
+        json={"src_points": [[10, 10], [110, 10], [110, 110], [10, 110]]},
+    )
+    assert r.status_code == 200
+    assert r.json()["calibrated"] is True
+
+    r = client.post("/calibration/clear")
+    assert r.status_code == 200
+    assert r.json()["calibrated"] is False
+
+
+def test_api_key_enforcement(tmp_path, monkeypatch):
+    monkeypatch.setenv("DARTBOARD_DB_PATH", str(tmp_path / "api-key.db"))
+    monkeypatch.setenv("DARTBOARD_API_KEY", "secret123")
+    api = importlib.import_module("src.dart_board.api")
+    api = importlib.reload(api)
+
+    client = TestClient(api.app)
+    r = client.get("/health")
+    assert r.status_code == 200
+
+    r = client.post("/users", json={"user_id": "u2", "name": "Matt"})
+    assert r.status_code == 401
+
+    r = client.post(
+        "/users",
+        json={"user_id": "u2", "name": "Matt"},
+        headers={"x-api-key": "secret123"},
+    )
+    assert r.status_code == 200

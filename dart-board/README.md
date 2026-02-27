@@ -19,6 +19,7 @@ Primary deployment target is local Podman, with host-native mode for USB camera 
 - Persistence: named volume `dart_board_data` with SQLite DB at `/data/dartboard.db`
 - Capture mode: disabled by default (`DARTBOARD_CAPTURE_ENABLED=false`)
 - Use this for: API, UI, heatmaps, checkout advice, and non-camera workflows.
+- Optional security: set `DARTBOARD_API_KEY` to require API key auth.
 
 ### Mode B: Host Native (USB capture)
 - Run API directly on macOS for local USB camera access via OpenCV.
@@ -27,6 +28,9 @@ Primary deployment target is local Podman, with host-native mode for USB camera 
 
 ## Current MVP Capabilities
 - Local UI for capture operations and heatmap viewing.
+- Side-by-side camera preview and heatmap view for placement verification.
+- Aiming reticle (cross + guide circle) overlay for camera alignment.
+- Board calibration (4-point homography) with warped board preview.
 - Create users and sessions.
 - Store throw points (`x_norm`, `y_norm`, confidence).
 - USB camera capture start/stop/status (when capture enabled).
@@ -43,6 +47,11 @@ Primary deployment target is local Podman, with host-native mode for USB camera 
 - `POST /capture/start`
 - `POST /capture/stop`
 - `GET /capture/status`
+- `GET /camera/frame.jpg?camera_index=0`
+- `GET /calibration/status`
+- `POST /calibration/set`
+- `POST /calibration/clear`
+- `GET /calibration/preview.jpg?camera_index=0`
 - `GET /checkout/{score}`
 - `GET /advice/{user_id}/{current_score}`
 - `GET /heatmap/{user_id}`
@@ -86,6 +95,13 @@ export DARTBOARD_CAPTURE_ENABLED=true
 uvicorn src.dart_board.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+Optional security:
+```bash
+export DARTBOARD_API_KEY=change-me
+```
+
+When enabled, send `x-api-key: <value>` on API calls. The built-in UI includes an API key input.
+
 ## Engineering Plan To Complete
 1. Streaming integration
    - Finalize source ingestion adapter after Luke confirms stream protocol.
@@ -105,6 +121,13 @@ uvicorn src.dart_board.api:app --host 0.0.0.0 --port 8000 --reload
    - Postgres migration.
    - CI pipeline for Podman image build/test.
    - Observability and error telemetry.
+
+## Calibration Notes
+- Provide four source points in this order:
+  `top-left; top-right; bottom-right; bottom-left`.
+- Input format in UI:
+  `x1,y1;x2,y2;x3,y3;x4,y4`
+- When calibration is active, captured hit points are transformed into normalized board-space before persistence.
 
 ## License
 MIT. See [LICENSE](LICENSE).

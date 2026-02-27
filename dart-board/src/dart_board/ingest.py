@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 
 import cv2
 
+from .calibration import BoardCalibrator
 from .cv import LiveImpactDetector
 from .storage import DartBoardStore
 
@@ -23,8 +24,9 @@ class CaptureState:
 
 
 class USBCaptureManager:
-    def __init__(self, store: DartBoardStore) -> None:
+    def __init__(self, store: DartBoardStore, calibrator: BoardCalibrator | None = None) -> None:
         self.store = store
+        self.calibrator = calibrator
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -93,11 +95,21 @@ class USBCaptureManager:
                     self._state.frames_processed += 1
 
                 if hit is not None:
+                    x_norm = hit.x_norm
+                    y_norm = hit.y_norm
+                    if self.calibrator is not None and self.calibrator.is_calibrated():
+                        h, w = frame.shape[:2]
+                        x_px = hit.x_norm * max(w - 1, 1)
+                        y_px = hit.y_norm * max(h - 1, 1)
+                        transformed = self.calibrator.transform_point(x_px, y_px)
+                        if transformed is not None:
+                            x_norm, y_norm = transformed
+
                     self.store.add_throw(
                         user_id=user_id,
                         session_id=session_id,
-                        x_norm=hit.x_norm,
-                        y_norm=hit.y_norm,
+                        x_norm=x_norm,
+                        y_norm=y_norm,
                         confidence=hit.confidence,
                     )
                     with self._lock:
