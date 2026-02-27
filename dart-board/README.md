@@ -64,6 +64,7 @@ Primary deployment target is local Podman, with host-native mode for USB camera 
 - `src/dart_board/storage.py` - SQLite persistence.
 - `src/dart_board/heatmap.py` - board heatmap rendering.
 - `src/dart_board/checkout.py` - checkout combination engine.
+- `docs/OPERATIONS.md` - operator runbook for setup, calibration, and QA/security checks.
 - `Containerfile` - Podman image definition.
 - `podman-compose.yml` - local stack orchestration.
 - `Makefile` - standard local/PODMAN commands.
